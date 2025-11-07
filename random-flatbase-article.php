@@ -50,3 +50,24 @@ function rfa_register_query_var($vars) {
 }
 add_filter('query_vars', 'rfa_register_query_var');
 
+
+// Shortcode: [surprise_article]
+// Renders a "Surprise Me" button that links to /random-article
+function rfa_surprise_article_shortcode($atts) {
+    // Allow customizing the text via [surprise_article text="Something"]
+    $atts = shortcode_atts(array(
+        'text' => 'Surprise Me',
+        'class' => '',
+    ), $atts, 'surprise_article');
+
+    // Use home_url() so it works on any domain / subdir
+    $url = home_url('/random-article');
+
+    // basic styling inline so it works anywhere
+    $html  = '<a href="' . esc_url($url) . '" class="rfa-surprise-button ' . esc_attr($atts['class']) . '" style="display:inline-block; padding:0.6em 1.2em; background:#0073aa; color:#fff; text-decoration:none; border-radius:4px;">';
+    $html .= esc_html($atts['text']);
+    $html .= '</a>';
+
+    return $html;
+}
+add_shortcode('surprise_article', 'rfa_surprise_article_shortcode');
