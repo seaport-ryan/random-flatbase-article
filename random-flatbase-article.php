@@ -1,8 +1,8 @@
 <?php
 /*
 Plugin Name: Random Flatbase Article
-Description: Redirects /random-article (or ?random_article=1) to a random Flatbase knowledge base article (post type "article").
-Version: 1.0
+Description: Redirects /random-article (or ?random_article=1) to a random Flatbase knowledge base article (post type "article"). Supports category filtering.
+Version: 1.3
 Author: You
 */
 
@@ -10,22 +10,78 @@ Author: You
 // 1) Main redirect logic
 //
 function rfa_random_flatbase_article_redirect() {
-    // Trigger on /random-article or ?random_article
-    if ( get_query_var('random_article') || isset($_GET['random_article']) || strpos($_SERVER['REQUEST_URI'], '/random-article') !== false ) {
+    // Should we run?
+    $is_random = get_query_var('random_article')
+                 || isset($_GET['random_article'])
+                 || (isset($_SERVER['REQUEST_URI']) && strpos($_SERVER['REQUEST_URI'], '/random-article') !== false);
 
-        // Get 1 random post of type 'article' (Flatbase KB entries)
-        $random = get_posts(array(
-            'post_type'      => 'article',
-            'posts_per_page' => 1,
-            'orderby'        => 'rand',
-        ));
+    if ( ! $is_random ) {
+        return;
+    }
 
-        if ( ! empty($random) ) {
-            $url = get_permalink($random[0]->ID);
-            wp_redirect($url);
-            exit;
+    // Optional category from URL: ?kb_cat=slug or ?category=slug
+    $requested_cat = '';
+    if ( get_query_var('kb_cat') ) {
+        $requested_cat = get_query_var('kb_cat');
+    } elseif ( isset($_GET['kb_cat']) ) {
+        $requested_cat = sanitize_text_field($_GET['kb_cat']);
+    } elseif ( isset($_GET['category']) ) {
+        $requested_cat = sanitize_text_field($_GET['category']);
+    }
+
+    $args = array(
+        'post_type'      => 'article',
+        'posts_per_page' => 1,
+        'orderby'        => 'rand',
+    );
+
+    // If a category was requested, try known taxonomies
+    if ( ! empty($requested_cat) ) {
+        $tax_query = array('relation' => 'OR');
+
+        // Your URL shows /article-category/... so check that first
+        if ( taxonomy_exists('article-category') ) {
+            $tax_query[] = array(
+                'taxonomy' => 'article-category',
+                'field'    => 'slug',
+                'terms'    => $requested_cat,
+            );
+        }
+
+        // Common variant
+        if ( taxonomy_exists('article_category') ) {
+            $tax_query[] = array(
+                'taxonomy' => 'article_category',
+                'field'    => 'slug',
+                'terms'    => $requested_cat,
+            );
+        }
+
+        // Fallback to built-in categories
+        if ( taxonomy_exists('category') ) {
+            $tax_query[] = array(
+                'taxonomy' => 'category',
+                'field'    => 'slug',
+                'terms'    => $requested_cat,
+            );
+        }
+
+        // Only add if we actually added something
+        if ( count($tax_query) > 1 ) {
+            $args['tax_query'] = $tax_query;
+        }
+    }
+
+    $random_article = get_posts($args);
+
+    if ( ! empty($random_article) ) {
+        wp_redirect( get_permalink($random_article[0]->ID) );
+        exit;
+    } else {
+        if ( ! empty($requested_cat) ) {
+            wp_die('No articles found in category: ' . esc_html($requested_cat));
         } else {
-            wp_die('No Flatbase articles found.');
+            wp_die('No articles found.');
         }
     }
 }
@@ -42,28 +98,32 @@ add_action('init', 'rfa_add_random_article_rewrite');
 
 
 //
-// 3) Register the query var
+// 3) Register query vars
 //
 function rfa_register_query_var($vars) {
     $vars[] = 'random_article';
+    $vars[] = 'kb_cat';
     return $vars;
 }
 add_filter('query_vars', 'rfa_register_query_var');
 
 
-// Shortcode: [surprise_article]
-// Renders a "Surprise Me" button that links to /random-article
+//
+// 4) Shortcode: [surprise_article text="..." category="brake"]
+//
 function rfa_surprise_article_shortcode($atts) {
-    // Allow customizing the text via [surprise_article text="Something"]
     $atts = shortcode_atts(array(
-        'text' => 'Surprise Me',
-        'class' => '',
+        'text'     => 'Surprise Me',
+        'class'    => '',
+        'category' => '',
     ), $atts, 'surprise_article');
 
-    // Use home_url() so it works on any domain / subdir
     $url = home_url('/random-article');
 
-    // basic styling inline so it works anywhere
+    if ( ! empty($atts['category']) ) {
+        $url = add_query_arg('kb_cat', urlencode($atts['category']), $url);
+    }
+
     $html  = '<a href="' . esc_url($url) . '" class="rfa-surprise-button ' . esc_attr($atts['class']) . '" style="display:inline-block; padding:0.6em 1.2em; background:#0073aa; color:#fff; text-decoration:none; border-radius:4px;">';
     $html .= esc_html($atts['text']);
     $html .= '</a>';
@@ -71,3 +131,4 @@ function rfa_surprise_article_shortcode($atts) {
     return $html;
 }
 add_shortcode('surprise_article', 'rfa_surprise_article_shortcode');
+
